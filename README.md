@@ -35,13 +35,101 @@ remDr <- driver[["client"]]
 ```
 The first step of our function will be to navigate to the supplied url.  It does this by using a method from the remoteDriver object.  Methods are basically the functions that you attach (with a "$") to a remoteDriver to interact with the browser. They include being able to navigate to specific urls, move our mouse to a specified location, screenshot the page, change the window size, etc.  
 
-The most useful methods in my experience, are those that allow you to interact with elements on the page such as filters and search boxes.  Elements are basically just different HTML objects, and we can search for them specifically using xpaths within a findElement() method (here's a great [tutorial for using xpath in a Selenium](https://www.guru99.com/xpath-selenium.html)). What is returned is an object of class webElement (or list of webElements if there are multiple elements with the same xpath, in which case you use findElement**s**()).
+The most useful methods in my experience, are those that allow you to interact with elements on the page such as filters and search boxes.  Elements are basically just different HTML objects, and we can search for them specifically using xpaths within a findElement() method (here's a great [tutorial for using xpath in a Selenium](https://www.guru99.com/xpath-selenium.html)). What is returned is an object of class webElement (or list of webElements if there are multiple elements with the same xpath, in which case you use the plural findElement**s**()).
 
-webElement objects, like remoteDriver objects, can be appended by methods. The webElement methods can be used to scrape data (i.e. getElementAttribute()) and also to click and select on filters. For instance, this .
+webElement objects, like remoteDriver objects, can be appended by methods. The webElement methods can be used to scrape data (i.e. getElementAttribute()) and also to click and select on filters. For instance, this will be how we navigate to the playlist tab on the xfl stats page in our scraper function:
 
+```r
+# Navigate to XFL Stats Page
+remDr$navigate(glue("https://stats.xfl.com/{game_num}"))
+# Click on play list tab
+remDr$findElement("xpath", "//h3[@id = 'pgPlayList']")$clickElement()
+```
 To close a Selenium browser, simply use the close method on the remoteDriver, and then stop the server with a method on the driver.
 
 ```r
 remDr$close()
 driver[["server"]]$stop()
 ```
+
+## Scraping Function
+
+The first step of my code is to construct the scraping function.  This function will navigate to the stats page for a given game, and extract the play-by-play data, iterating by row. It's nested within the data-loading function later, as it will scrape the webpage only if the most recent games' data doesn't exist on the existing play-by-play file in the github repository.
+
+Let's take this chunk by chunk:
+
+The first line of code, for those unfamilar with functions, names the function and sets the parameters, which in this case is the game number.  The XFL has a very simple syntax for their urls, with the game number at the end. The glue function allows us to pass the parameter into the url for each game.
+``` r
+retrieve_games <- function(game_num){
+  
+  # Navigate to XFL Stats Page
+  remDr$navigate(glue("https://stats.xfl.com/{game_num}"))
+``` 
+The next line of code is our first interaction with a webElement.  When inspecting a webpage, right click on the element and select inspect to find the html code behind the element.  In this case, the we find that the playlist tab is of a h3 object.  We can identify it by looking at the attributes of the element, in this case the id is 'pgPlayList'.  Using xpath code in the findElement method, we can retrieve the html for this object, and in this case we want to click it, so we use the clickElement method.
+
+``` r
+  # Click on play list tab
+  remDr$findElement("xpath", "//h3[@id = 'pgPlayList']")$clickElement()
+```
+We are combining the play-by-play tables from multiple games, so the title of the home and away score columns won't include the team (even though that's how the table is displayed on the webpage).  Instead, we are going to create our own column for home and away team in each game that we can mutate to get a column for each team's score.  We retrieve the home and away team codes by finding the element for the column headers through their data-bind attribute and using the getElementText() method.
+
+``` r
+  # Retrieve Home and Away Team Codes
+  away <- unlist(remDr$findElement("xpath", "//div[@data-bind = 'text: awayClubCode']")$getElementText())
+  home <- unlist(remDr$findElement("xpath", "//div[@data-bind = 'text: homeClubCode']")$getElementText())
+``` 
+
+
+``` r
+  # Create function that returns a list of webElements containing each row value in a column
+  retrieve_column <- function(column_name){
+    if(column_name == "rPlayDesc"){
+      remDr$findElements("xpath", glue("//div[@class = 'table totalPlaylist']\\
+                                      //child::div[@class = 'body']\\
+                                      //child::div[@class = '{column_name}']\\
+                                      //child::div[contains(@data-bind, 'PlayDescription')]"))
+    } else {
+      remDr$findElements("xpath", glue("//div[@class = 'table totalPlaylist']\\
+                                      //child::div[@class = 'body']\\
+                                      //child::div[@class = '{column_name}']"))
+    }
+  }
+```
+
+``` r
+  # Store a list of webElement lists for each column we want to retrieve
+  columns <- lapply(c("rQtr", "rStart", "rPoss", "rPossDown", "rPlayDesc", "rPlays hideMobile scored",
+                      "rYards hideMobile scored", "rTime hideMobile scored", "rVisitor hideMobile scored",
+                      "rHome hideMobile scored"), 
+                    function(x){
+                      retrieve_column(x)
+                    })
+  
+  # Find the minimum rows for each column
+  plays <- min(sapply(1:length(columns), function(x){
+    length(columns[[x]])
+  }))
+  
+  # Scrape a game's play-by-play for the relevant columns
+  game_pbp <- map_dfr(1:plays, function(x){
+    play_info <- tibble(Game = game_num)
+    play_info$PlayID <- 5*x
+    play_info$Qtr <- unlist(columns[[1]][[x]]$getElementText())
+    play_info$Time <- unlist(columns[[2]][[x]]$getElementText())
+    play_info$Off <- unlist(columns[[3]][[x]]$getElementText())
+    play_info$Situation <- unlist(columns[[4]][[x]]$getElementText())
+    play_info$Description <- unlist(columns[[5]][[x]]$getElementText())
+    play_info$DrivePlays <- unlist(columns[[6]][[x]]$getElementText())
+    play_info$DriveYards <- unlist(columns[[7]][[x]]$getElementText())
+    play_info$DriveTime <- unlist(columns[[8]][[x]]$getElementText())
+    play_info$AwayScoreAfterDrive <- unlist(columns[[9]][[x]]$getElementText())
+    play_info$HomeScoreAfterDrive <- unlist(columns[[10]][[x]]$getElementText())
+    play_info$HomeTeam <- home
+    play_info$AwayTeam <- away
+    return(play_info)
+  })
+  
+  return(game_pbp)
+}
+```
+In the actual xflscrapR script, we have the code to open the remote driver in the function that scrapes the data instead because the scraping is conditional on whether the file has been updated in the github repository.
