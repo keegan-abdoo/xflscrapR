@@ -15,10 +15,8 @@ retrieve_games <- function(game_num){
   remDr$findElement("xpath", "//h3[@id = 'pgPlayList']")$clickElement()
   
   # Retrieve Home and Away Team Codes
-  away <- str_extract(remDr$findElements("xpath", "//div[@class = 'teamBrand']//child::img")[[1]]$
-                        getElementAttribute("src"), "[A-Z]+(?=\\.png$)")
-  home <- str_extract(remDr$findElements("xpath", "//div[@class = 'teamBrand']//child::img")[[2]]$
-                        getElementAttribute("src"), "[A-Z]+(?=\\.png$)")
+  away <- unlist(remDr$findElement("xpath", "//div[@data-bind = 'text: awayClubCode']")$getElementText())
+  home <- unlist(remDr$findElement("xpath", "//div[@data-bind = 'text: homeClubCode']")$getElementText())
   
   # Create function that returns a list of webElements containing each row value in a column
   retrieve_column <- function(column_name){
