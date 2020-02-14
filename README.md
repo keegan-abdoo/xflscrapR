@@ -61,27 +61,27 @@ Let's take this chunk by chunk:
 The first line of code, for those unfamilar with functions, names the function and sets the parameters, which in this case is the game number.  The XFL has a very simple syntax for their urls, with the game number at the end. The glue function allows us to pass the parameter into the url for each game.
 ``` r
 retrieve_games <- function(game_num){
-  
-  # Navigate to XFL Stats Page
+
   remDr$navigate(glue("https://stats.xfl.com/{game_num}"))
 ``` 
 The next line of code is our first interaction with a webElement.  When inspecting a webpage, right click on the element and select inspect to find the html code behind the element.  In this case, the we find that the playlist tab is of a h3 object.  We can identify it by looking at the attributes of the element, in this case the id is 'pgPlayList'.  Using xpath code in the findElement method, we can retrieve the html for this object, and in this case we want to click it, so we use the clickElement method.
 
 ``` r
-  # Click on play list tab
   remDr$findElement("xpath", "//h3[@id = 'pgPlayList']")$clickElement()
 ```
 We are combining the play-by-play tables from multiple games, so the title of the home and away score columns won't include the team (even though that's how the table is displayed on the webpage).  Instead, we are going to create our own column for home and away team in each game that we can mutate to get a column for each team's score.  We retrieve the home and away team codes by finding the element for the column headers through their data-bind attribute and using the getElementText() method.
 
 ``` r
-  # Retrieve Home and Away Team Codes
   away <- unlist(remDr$findElement("xpath", "//div[@data-bind = 'text: awayClubCode']")$getElementText())
   home <- unlist(remDr$findElement("xpath", "//div[@data-bind = 'text: homeClubCode']")$getElementText())
 ``` 
+The structure of the html has everything containted in a div object of class "table totalPlaylist".  From there, the child elements are a div of class "head" for the header row and then each play is contained in a div of class "body".  Each row object has a group of descendents of div objects which has a class named after the column.  Each of these elements contains the text attribute that we want to return.
 
+My strategy here is to return a list for each class/column under the body objects. Once we have that, it's easy to construct a data frame row by row from the data in the table.
+
+To compress the code, I've created a helper function that will retrieve a list of webElements for a given column by identifying it by the class name. Notice that we have an if statement to deal with the play description column, which doesn't directly contain the text attribute.  We have to skip down to it's child element, the div identified by a data-bind called "text: PlayDescription, updatedClass: 'highlight'".  For brevity sake, we will utilize the xpath function contains and just search for "PlayDescription".
 
 ``` r
-  # Create function that returns a list of webElements containing each row value in a column
   retrieve_column <- function(column_name){
     if(column_name == "rPlayDesc"){
       remDr$findElements("xpath", glue("//div[@class = 'table totalPlaylist']\\
@@ -95,6 +95,7 @@ We are combining the play-by-play tables from multiple games, so the title of th
     }
   }
 ```
+With the helper function, we can then read in a vector of the column class names into the helper function to return a list of webElement lists for each column.
 
 ``` r
   # Store a list of webElement lists for each column we want to retrieve
@@ -104,7 +105,9 @@ We are combining the play-by-play tables from multiple games, so the title of th
                     function(x){
                       retrieve_column(x)
                     })
-  
+```
+
+``` r
   # Find the minimum rows for each column
   plays <- min(sapply(1:length(columns), function(x){
     length(columns[[x]])
