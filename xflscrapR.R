@@ -4,6 +4,7 @@ library(XML)
 library(tidyverse)
 library(lubridate)
 library(magrittr)
+library(stringi)
 
 # Function that navigates to each game web page and scrapes the play by play
 retrieve_games <- function(game_num){
@@ -97,7 +98,19 @@ clean_data <- function(df){
                                 str_detect(str_to_lower(Description), "field goal") ~ "field goal",
                                 str_detect(Description, "[1-3]pt attempt") ~ "extra point",
                                 str_detect(Description, "Aborted") ~ "aborted snap",
-                                TRUE ~ "no play"))
+                                TRUE ~ "no play"),
+           # Get yards gained on play
+           YardsGained = case_when(PlayType %in% c("run","pass") ~ 
+                                     as.numeric(stri_extract_last_regex(Description,pattern=c("\\-*\\d+\\.*\\d*")))
+                                   ),
+           # Is this a touchdown?
+           Touchdown = if_else(str_detect(Description,"TOUCHDOWN"),1,0),
+           # Is this an incomplete pass? NAs if not pass play
+           IncompletePass = case_when(PlayType == "pass" ~ if_else(str_detect(Description,"incomplete"),1,0)
+                                      ),
+           # Extract passer name
+           PasserName = case_when(PlayType == "pass" ~ stri_extract_first_regex(Description,pattern=c("[A-Z][.]([a-zA-Z]+)"))),
+           )
   
   return(pbp1)
 }
