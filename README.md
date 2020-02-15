@@ -66,7 +66,10 @@ retrieve_games <- function(game_num){
 ``` 
 The next line of code is our first interaction with a webElement.  When inspecting a webpage, right click on the element and select inspect to find the html code behind the element.  In this case, the we find that the playlist tab is of a h3 object.  We can identify it by looking at the attributes of the element, in this case the id is 'pgPlayList'.  Using xpath code in the findElement method, we can retrieve the html for this object, and in this case we want to click it, so we use the clickElement method.
 
+The Sys.sleep(4) command is included to force R to pause for 4 seconds, which allows the webpage to load properly and ensure that the playlist tab element is found.
+
 ``` r
+  Sys.sleep(4)
   remDr$findElement("xpath", "//h3[@id = 'pgPlayList']")$clickElement()
 ```
 We are combining the play-by-play tables from multiple games, so the title of the home and away score columns won't include the team (even though that's how the table is displayed on the webpage).  Instead, we are going to create our own column for home and away team in each game that we can mutate to get a column for each team's score.  We retrieve the home and away team codes by finding the element for the column headers through their data-bind attribute and using the getElementText() method.
@@ -95,10 +98,9 @@ To compress the code, I've created a helper function that will retrieve a list o
     }
   }
 ```
-With the helper function, we can then read in a vector of the column class names into the helper function to return a list of webElement lists for each column.
+With the helper function, we can then read in a vector of the column class names through a lapply into the helper function to return a list of webElement lists for each column.  The purpose of this is to store the lists of webElements outside the row-by-row iteration so it doesn't have to pull the webElement element list with each row.
 
 ``` r
-  # Store a list of webElement lists for each column we want to retrieve
   columns <- lapply(c("rQtr", "rStart", "rPoss", "rPossDown", "rPlayDesc", "rPlays hideMobile scored",
                       "rYards hideMobile scored", "rTime hideMobile scored", "rVisitor hideMobile scored",
                       "rHome hideMobile scored"), 
@@ -106,13 +108,18 @@ With the helper function, we can then read in a vector of the column class names
                       retrieve_column(x)
                     })
 ```
+For reason not exactly clear to me, some of the columns return a list of webElements that are longer than the actual amount of plays. So here we just take the minimum length of the webElement lists to make sure we don't get a "subscript out of bounds"" error.
 
 ``` r
-  # Find the minimum rows for each column
   plays <- min(sapply(1:length(columns), function(x){
     length(columns[[x]])
   }))
-  
+```
+Next we use that minimum length to construct a sequence vector **(1:plays)** that we read through the map_dfr function to construct each row of our final data frame.  The map_dfr function returns a data frame that is created by row binding ("df" for data frame and "r" for by row after the underscore). It takes each value in the supplied vector and reads it through a helper function, which we create below.
+
+A few things on the helper function in case anyone is unfamiliar any of the functions/methods used.  The tibble() function is used to create a data frame, with the first column of Game being asigned the game number passed in through the retrieve_games function that this is nested in. I also created custom play_id's, which I have defined as the row number muliplied by 5 (a relic of my experience at Sports Info Solutions haha).  I retrieve the value in each column by using the getElementText() method.  This is nested in an unlist() function to avoid the value being returned as a list.  The home and away team columns are also assigned based on the values we pulled earlier.
+
+``` r
   # Scrape a game's play-by-play for the relevant columns
   game_pbp <- map_dfr(1:plays, function(x){
     play_info <- tibble(Game = game_num)
@@ -135,4 +142,53 @@ With the helper function, we can then read in a vector of the column class names
   return(game_pbp)
 }
 ```
+Now that we have the infastructure built to scrape the play-by-play from each game, we create a cleaner function that will manipulate the pulled data to match the structure of the existing csv in the github.
+
+Let's take a look at the first few chunks of this function:
+
+First we are setting the parameter to be a data frame.  This data frame will almost always be the scraped play-by-play, but if we want to update the cleaning function with new columns to build, we also have the capability to do that with our select function.  The scraped data frame has 14 columns, so we make sure to exclude any columns indexed 15 or greater (-c(15:ncol(df))).
+``` r
+clean_data <- function(df){
+  pbp1 <- df %>%
+    select(-c(15:ncol(df))) %>%
+```
+The mutate statement is where we will start creating the new columns we want.  
+
+First we get a week number, which is accomplished by taking the ceiling of the game_num divided by 4.  We use this Week number in creating the GameID column, which I converted to be in the same format as the GSIS GameIDs that the NFL uses.  
+
+The %% operator gives the remainder by division, so in this case we are using it to find the game number within each week.  Because the XFL schedule has two games on Saturday and two games on Sunday, the remainders of 1 and 2 of game_num divided by 4 represent Saturday games, while 3 and 4 represent Sunday games.  We can then 
+
+``` r
+    mutate(Week = ceiling(Game/4),
+           # Create GameIDs in NFL's GSIS format
+           GameID = if_else(Game%%4 %in% c(1, 2),
+                            str_remove_all(glue("{ymd(20200208) + (Week-1)*7}"), "-"),
+                            str_remove_all(glue("{ymd(20200209) + (Week-1)*7}"), "-")),
+           GameID = if_else(Game%%2 == 1,
+                            as.character(glue("{GameID}00")),
+                            as.character(glue("{GameID}01"))),
+           # Extract Down and Distance
+           Down = str_extract(Situation, "^[1-4]"),
+           Distance = str_extract(Situation, "(?<=\\& )[0-9]+"),
+           # Convert Field Position to Yards from the end zone
+           Yardline_100 = case_when(str_detect(Situation, "50$") ~ 50,
+                                    str_extract(Situation, "[A-Z]+(?= [0-9]{1,2}$)") == Off ~ 
+                                      100 - as.numeric(str_extract(Situation, "[0-9]{1,2}$")),
+                                    TRUE ~ as.numeric(str_extract(Situation, "[0-9]{1,2}$"))),
+           # Is it goal to go?
+           GoalToGo = if_else(Distance == Yardline_100, 1, 0),
+           # Get Play Types
+           PlayType = case_when(str_detect(Description, "(rush)|(kneel)") ~ "run",
+                                str_detect(Description, "(pass)|(scramble)|(sack)|(spike)") ~ "pass",
+                                str_detect(Description, "punt") ~ "punt",
+                                str_detect(Description, "kickoff") ~ "kickoff",
+                                str_detect(str_to_lower(Description), "field goal") ~ "field goal",
+                                str_detect(Description, "[1-3]pt attempt") ~ "extra point",
+                                str_detect(Description, "Aborted") ~ "aborted snap",
+                                TRUE ~ "no play"))
+  
+  return(pbp1)
+}
+```
+
 In the actual xflscrapR script, we have the code to open the remote driver in the function that scrapes the data instead because the scraping is conditional on whether the file has been updated in the github repository.
