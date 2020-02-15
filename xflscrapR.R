@@ -93,27 +93,39 @@ clean_data <- function(df){
            GoalToGo = if_else(Distance == Yardline_100, 1, 0),
            # Get Play Types
            PlayType = case_when(str_detect(Description, "(rush)|(kneel)") ~ "run",
-                                str_detect(Description, "(pass)|(scramble)|(sack)|(spike)") ~ "pass",
+                                str_detect(Description, "(pass)|(scramble)|(sack)|(spike)") ~ "dropback",
                                 str_detect(Description, "punt") ~ "punt",
                                 str_detect(Description, "kickoff") ~ "kickoff",
                                 str_detect(str_to_lower(Description), "field goal") ~ "field goal",
                                 str_detect(Description, "[1-3]pt attempt") ~ "extra point",
                                 str_detect(Description, "Aborted") ~ "aborted snap",
                                 TRUE ~ "no play"),
+           # Is pass a spike?
+           Spike = if_else(str_detect(Description, "spike"), 1, 0),
+           # Is pass a QB Kneel
+           QBKneel = if_else(str_detect(Description, "kneel"), 1, 0),
+           # Was the QB sacked?
+           Sack = if_else(str_detect(Description, "sack"), 1, 0),
+           # Did the QB Scramble?
+           Scramble = if_else(str_detect(Description, "scramble"), 1, 0),
+           # Was there a pass attempt?
+           PassAttempt = if_else(Sack == 0 & Scramble == 0 & PlayType == "dropback", 1, 0),
+           # Was the pass intercepted?
+           Interception = if_else(str_detect(str_to_lower(Description), "intercepted"), 1, 0),
+           # Was the pass completed?
+           Complete = if_else(PassAttempt == 1 & !str_detect(Description, "incomplete") &
+                                  Interception != 1, 1, 0),
            # Get yards gained on play
-           YardsGained = case_when(PlayType %in% c("run","pass") ~ 
-                                     as.numeric(stri_extract_last_regex(Description,pattern=c("\\-*\\d+\\.*\\d*")))
-                                   ),
+           YardsGained = case_when(Spike == 1 | Complete == 0 ~ 0,
+                                   str_detect(Description, "sacked to") ~
+                                       as.numeric(str_extract(Description, "(?<=\\sfor\\s)\\-?\\[0-9]{1,2}")),
+                                   PlayType %in% c("run","dropback") ~ 
+                                       as.numeric(stri_extract_last_regex(Description,pattern=c("\\-*\\d+\\.*\\d*")))),
            # Is this a touchdown?
-           Touchdown = if_else(str_detect(Description,"TOUCHDOWN"),1,0),
+           Touchdown = if_else(str_detect(str_to_lower(Description), "touchdown"), 1, 0),
            # Extra point succesful?
            ExtraPointConverted = case_when(PlayType == "extra point" ~ if_else(str_detect(Description,"unsuccessful"),0,1)
                                            ),
-           # Is this an incomplete pass? NAs if not pass play
-           IncompletePass = case_when(PlayType == "pass" ~ if_else(str_detect(Description,"incomplete"),1,0)
-                                      ),
-           # Is this an interception?
-           Interception = if_else(str_detect(Description,"INTERCEPTED"),1,0),
            # Is this a penalty?
            Penalty = if_else(str_detect(Description,"PENALTY"),1,0),
            # On who is the penalty?
