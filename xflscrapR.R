@@ -12,6 +12,7 @@ retrieve_games <- function(game_num){
   # Navigate to XFL Stats Page
   remDr$navigate(glue("https://stats.xfl.com/{game_num}"))
   
+  Sys.sleep(4)
   # Click on play list tab
   remDr$findElement("xpath", "//h3[@id = 'pgPlayList']")$clickElement()
   

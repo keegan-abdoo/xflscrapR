@@ -1,6 +1,6 @@
 # Scraping and Cleaning XFL Play-By-Play Data with RSelenium
 
-This is my second tutorial on how to scrape football data with RSelenium (find the first one on scraping weekly Next Gen Stats data [here](https://github.com/keegan-abdoo/Public-Next-Gen-Stats-Weekly-Data/blob/master/ngspublicscraping.md)). Unlike the first tutorial, the data is not stored in a HTML table, so this is a good example getting more hands-on with your scraper.
+This is my second tutorial on how to scrape football data with RSelenium (find the first one on scraping weekly Next Gen Stats data [here](https://github.com/keegan-abdoo/Public-Next-Gen-Stats-Weekly-Data/blob/master/ngspublicscraping.md)). Unlike the first tutorial, the data is not stored in a HTML table, so this is a good example getting more hands-on with your scraper. I also include explanation behind the data cleaning function, which Caio Brighenti [@CaioBrighenti2](https://twitter.com/CaioBrighenti2) has helped put together.
 
 To reiterate, the RSelenium package allows you to open a web browser, interact with webpages, and extract data from the underlying html that builds the websites all through your code. Again, I suggest following along with this [RSelenium Baics Primer](https://rpubs.com/johndharrison/RSelenium-Basics).
 
@@ -66,7 +66,10 @@ retrieve_games <- function(game_num){
 ``` 
 The next line of code is our first interaction with a webElement.  When inspecting a webpage, right click on the element and select inspect to find the html code behind the element.  In this case, the we find that the playlist tab is of a h3 object.  We can identify it by looking at the attributes of the element, in this case the id is 'pgPlayList'.  Using xpath code in the findElement method, we can retrieve the html for this object, and in this case we want to click it, so we use the clickElement method.
 
+The Sys.sleep(4) command is included to force R to pause for 4 seconds, which allows the webpage to load properly and ensure that the playlist tab element is found.
+
 ``` r
+  Sys.sleep(4)
   remDr$findElement("xpath", "//h3[@id = 'pgPlayList']")$clickElement()
 ```
 We are combining the play-by-play tables from multiple games, so the title of the home and away score columns won't include the team (even though that's how the table is displayed on the webpage).  Instead, we are going to create our own column for home and away team in each game that we can mutate to get a column for each team's score.  We retrieve the home and away team codes by finding the element for the column headers through their data-bind attribute and using the getElementText() method.
@@ -95,10 +98,9 @@ To compress the code, I've created a helper function that will retrieve a list o
     }
   }
 ```
-With the helper function, we can then read in a vector of the column class names into the helper function to return a list of webElement lists for each column.
+With the helper function, we can then read in a vector of the column class names through a lapply into the helper function to return a list of webElement lists for each column.  The purpose of this is to store the lists of webElements outside the row-by-row iteration so it doesn't have to pull the webElement element list with each row.
 
 ``` r
-  # Store a list of webElement lists for each column we want to retrieve
   columns <- lapply(c("rQtr", "rStart", "rPoss", "rPossDown", "rPlayDesc", "rPlays hideMobile scored",
                       "rYards hideMobile scored", "rTime hideMobile scored", "rVisitor hideMobile scored",
                       "rHome hideMobile scored"), 
@@ -106,13 +108,18 @@ With the helper function, we can then read in a vector of the column class names
                       retrieve_column(x)
                     })
 ```
+For reason not exactly clear to me, some of the columns return a list of webElements that are longer than the actual amount of plays. So here we just take the minimum length of the webElement lists to make sure we don't get a "subscript out of bounds"" error.
 
 ``` r
-  # Find the minimum rows for each column
   plays <- min(sapply(1:length(columns), function(x){
     length(columns[[x]])
   }))
-  
+```
+Next we use that minimum length to construct a sequence vector **(1:plays)** that we read through the map_dfr function to construct each row of our final data frame.  The map_dfr function returns a data frame that is created by row binding ("df" for data frame and "r" for by row after the underscore). It takes each value in the supplied vector and reads it through a helper function, which we create below.
+
+A few things on the helper function in case anyone is unfamiliar any of the functions/methods used.  The tibble() function is used to create a data frame, with the first column of Game being asigned the game number passed in through the retrieve_games function that this is nested in. I also created custom play_id's, which I have defined as the row number muliplied by 5 (a relic of my experience at Sports Info Solutions haha).  I retrieve the value in each column by using the getElementText() method.  This is nested in an unlist() function to avoid the value being returned as a list.  The home and away team columns are also assigned based on the values we pulled earlier.
+
+``` r
   # Scrape a game's play-by-play for the relevant columns
   game_pbp <- map_dfr(1:plays, function(x){
     play_info <- tibble(Game = game_num)
@@ -135,4 +142,118 @@ With the helper function, we can then read in a vector of the column class names
   return(game_pbp)
 }
 ```
-In the actual xflscrapR script, we have the code to open the remote driver in the function that scrapes the data instead because the scraping is conditional on whether the file has been updated in the github repository.
+
+## Cleaning Function
+
+Now that we have the infastructure built to scrape the play-by-play from each game, we create a cleaner function that will manipulate the pulled data to match the structure of the existing csv in the github.
+
+Let's take a look at the first few chunks of this function:
+
+First we are setting the parameter to be a data frame.  This data frame will almost always be the scraped play-by-play, but if we want to update the cleaning function with new columns to build, we also have the capability to do that with our select function.  The scraped data frame has 14 columns, so we make sure to exclude any columns indexed 15 or greater (-c(15:ncol(df))).
+``` r
+clean_data <- function(df){
+  pbp1 <- df %>%
+    select(-c(15:ncol(df))) %>%
+```
+The mutate statement is where we will start creating the new columns we want.  
+
+First we get a week number, which is accomplished by taking the ceiling of the game_num divided by 4.  We use this Week number in creating the GameID column, which I converted to be in the same format as the GSIS GameIDs that the NFL uses ({Year}{Month}{Day}{Game#ofDay}).
+
+The %% operator gives the remainder by division, so in this case we are using it to find the game number within each week.  Because the XFL schedule has two games on Saturday and two games on Sunday, the remainders of 1 and 2 of game_num divided by 4 represent Saturday games, while 3 and 4 represent Sunday games.  We can then add the correct multiple of 7 days based on our Week variable to the original dates from Week 1 (February 8/9).  Because the ymd function from the lubridate package outputs the date with "-"s separating year, month and day, we use stringr's str_remove_all function to remove the "-".  Finally, we take one more remainder to find if it's the first or second game in a day, and attach that to the end of the GameID string.
+
+``` r
+    mutate(Week = ceiling(Game/4),
+           GameID = if_else(Game%%4 %in% c(1, 2),
+                            str_remove_all(glue("{ymd(20200208) + (Week-1)*7}"), "-"),
+                            str_remove_all(glue("{ymd(20200209) + (Week-1)*7}"), "-")),
+           GameID = if_else(Game%%2 == 1,
+                            as.character(glue("{GameID}00")),
+                            as.character(glue("{GameID}01"))),
+```
+Next we can extract the down, distance, and field position information from the situation column.  We are accomplishing this with some regex through the stringr package, so I'll explain what's going on here. I also highly recommend pulling up the [stringr cheatsheet](http://edrub.in/CheatSheets/cheatSheetStringr.pdf) whenever you are trying to manipulate text strings.
+
+The str_extract function allows you to return a substring of any string.  Since the Down value is the first number in any column, we identify that through the "^" anchor regular expression.  This simply refers to the first character in a string.  Since there are only 4 downs, we can specify [1-4] as the characters we want to extract.
+
+The distance to go value is found in the middle of the situation string, and it always comes after the ampersand (&) symbol. To extract this, we can use what is called a look-around: "(?<=)", or precedy by. In its use here, we put the ampersand and a space inside the look around, followed by a "[0-9]+" outside the parentheses.  This regular expression translates to return any string of consecutive digits that is preceded by an ampersand and a space.
+
+The distance from the yardline value is extracted with a case_when function.  This function allows us to specify values for a new variable conditionally. The situation string contains field position based on side of the field, so we need to cross reference that value with the Offensive Team variable.  
+
+Our first condition in the case when will deal with when the ball is on the 50 yard line, because by default it isn't on either the offense or defenses side of the field. We accomplish this with a str_detect() function, which returns TRUE if it finds the expression in the given string. Notice we are using the "$" anchor, which is directs to the last character in a string. The next condition extracts the side of the field, again using a look around: "(?=)", or followed by. This time we use " [0-9]{1,2}" with the anchor at the end inside the look around, which follows [A-Z]+.  This translates to extract any string of consecutive letters that is followed by a space, and one or two digits at the end of the string. If the returned team is the same as the team in possesion, we subtract 100 by the yardline, otherwise we return the yardline, giving us distance from the end zone.
+
+``` r
+           Down = str_extract(Situation, "^[1-4]"),
+           Distance = str_extract(Situation, "(?<=& )[0-9]+"),
+           Yardline_100 = case_when(str_detect(Situation, "50$") ~ 50,
+                                    str_extract(Situation, "[A-Z]+(?= [0-9]{1,2}$)") == Off ~ 
+                                      100 - as.numeric(str_extract(Situation, "[0-9]{1,2}$")),
+                                    TRUE ~ as.numeric(str_extract(Situation, "[0-9]{1,2}$"))),
+           GoalToGo = if_else(Distance == Yardline_100, 1, 0),
+```
+The next part of cleaning the data occurs with assigning play_types. Again we use a case_when statement, utilizing str_detect() to search the play description for key words that distinguish the play type.
+
+``` r
+           PlayType = case_when(str_detect(Description, "(rush)|(kneel)") ~ "run",
+                                str_detect(Description, "(pass)|(scramble)|(sack)|(spike)") ~ "pass",
+                                str_detect(Description, "punt") ~ "punt",
+                                str_detect(Description, "kickoff") ~ "kickoff",
+                                str_detect(str_to_lower(Description), "field goal") ~ "field goal",
+                                str_detect(Description, "[1-3]pt attempt") ~ "extra point",
+                                str_detect(Description, "Aborted") ~ "aborted snap",
+                                TRUE ~ "no play"))
+  
+  return(pbp1)
+}
+```
+There will be more columns added in to the cleaning function as Caio and I develop this out more, but I figured this was a helpful resource for people new to string parsing.
+
+## Final function
+
+The xfl_scrapR function brings together both our scraping and cleaning function to output the most up-to-date XFL play-by-play data in a file. Let's look at what's going on here chunk by chunk:
+
+First, we read in the existing play-by-play file in the github repository:
+
+``` r
+xfl_scrapR <- function(){
+  pbp <- read_csv(url("https://raw.githubusercontent.com/keegan-abdoo/xflscrapR/master/play_by_play_data/regular_season/reg_pbp_2020.csv"))
+```
+Next we utilize the lubridate package to automate this function based on the date the user is pulling the data. The wday function returns the day of the week as an integer (starting at Sunday == 1) and the Sys.time() function returns the current date and time. We can find the most recent game played by some conditional date checking here.
+
+We also find the most recent game in the existing data set by simply taking the max of the Game column.
+
+``` r
+  most_recent_game <- if_else(wday(as_date(Sys.time())) == 7, 2, 4) + 
+    4*floor((as.numeric(as_date(Sys.time())) - as.numeric(ymd(20200208)))/7)
+  
+  last_game <- max(pbp$Game)
+
+```
+If the most recent game played is not updated in the github repository, we open the remote driver. With the remote driver opened, we can use the retrieve game function within a map_dfr function to scrape any games that have occured and but haven't been updated yet.  Once we have the data frame of newly-scraped games, we use my new favorite operator %<>% (shoutout to [@ZachFeldman3](https://twitter.com/ZachFeldman3) for showing me this) to rewrite the data frame with our data cleaning function. We then bind the new data frame to the existing one and have a fully updated play-by-play dataset. We exit the browser and the function returns the new data frame.
+
+``` r
+  if(most_recent_game > last_game){
+    # Open Web Browser
+    driver <- rsDriver(browser = "firefox")
+    remDr <- driver[["client"]]
+    
+    # Scrape new games
+    pbp1 <- map_dfr(last_game:most_recent_game, retrieve_games)
+    
+    # Clean Data
+    pbp1 %<>% clean_data(pbp1)
+    
+    # Join to old data
+    pbp <<- bind_rows(pbp, pbp1)
+    
+    # Close Browser when done
+    remDr$close()
+    driver[["server"]]$stop()
+  }
+  # Return up-to-date and cleaned play-by-play data
+  return(pbp)
+}
+```
+
+Finally, you just import the most-updated dataset with the following command.  Because we nested all the data-scraping and wrangling in 3 functions, we have reduced this to one line of code a user needs to run!
+``` r
+pbp <- xfl_scrapR()
+```
