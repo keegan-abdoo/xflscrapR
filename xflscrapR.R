@@ -106,11 +106,38 @@ clean_data <- function(df){
                                    ),
            # Is this a touchdown?
            Touchdown = if_else(str_detect(Description,"TOUCHDOWN"),1,0),
+           # Extra point succesful?
+           ExtraPointConverted = case_when(PlayType == "extra point" ~ if_else(str_detect(Description,"unsuccessful"),0,1)
+                                           ),
            # Is this an incomplete pass? NAs if not pass play
            IncompletePass = case_when(PlayType == "pass" ~ if_else(str_detect(Description,"incomplete"),1,0)
                                       ),
+           # Is this an interception?
+           Interception = if_else(str_detect(Description,"INTERCEPTED"),1,0),
+           # Is this a penalty?
+           Penalty = if_else(str_detect(Description,"PENALTY"),1,0),
+           # On who is the penalty?
+           PenaltyTeam = case_when(Penalty == 1 ~ gsub(".*PENALTY","",Description) %>% str_split(" ") %>% sapply( "[[", 3) %>% 
+                                     gsub(pattern = "[.]", replacement = "")
+                                  ),
+           # What kind of penalty?
+           PenaltyType = case_when(Penalty == 1 ~ gsub(".*PENALTY","",Description) %>% stri_extract_first_regex(pattern=c("[.].*,")) %>%
+                                     str_split(",") %>% sapply( "[[", 1) %>% gsub(pattern="([.] )",replacement="")
+                                   ),
+           # How many yards lost?
+           PenaltyYards = case_when(Penalty == 1 ~ gsub(".*PENALTY","",Description) %>% 
+                                      stri_extract_first_regex(pattern=c(pattern=c("\\-*\\d+\\.*\\d*"))) %>% as.numeric()
+           ),
            # Extract passer name
            PasserName = case_when(PlayType == "pass" ~ stri_extract_first_regex(Description,pattern=c("[A-Z][.]([a-zA-Z]+)"))),
+           # Extract receiver name
+           ReceiverName = case_when(PlayType == "pass" & Interception == 0 ~
+                                      stri_extract_last_regex(Description,pattern=c(" [A-Z][.]([a-zA-Z]+)")) %>% str_trim(),
+                                    PlayType == "pass" & Interception == 1 ~
+                                      stri_extract_last_regex(gsub("INTERCEPTED.*","",Description),pattern=c("[A-Z][.]([a-zA-Z]+)"))
+                                    ),
+           # Extract rusher name
+           RunnerName = case_when(PlayType == "run" ~ stri_extract_first_regex(Description,pattern=c("[A-Z][.]([a-zA-Z]+)")) )
            )
   
   return(pbp1)
