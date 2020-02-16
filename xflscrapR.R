@@ -109,18 +109,18 @@ clean_data <- function(df){
            # Did the QB Scramble?
            Scramble = if_else(str_detect(Description, "scramble"), 1, 0),
            # Was there a pass attempt?
-           PassAttempt = if_else(Sack == 0 & Scramble == 0 & PlayType == "dropback", 1, 0),
+           PassAttempt = if_else(Sack == 0 & Scramble == 0 & Spike == 0 & QBKneel == 0 & PlayType == "dropback", 1, 0),
            # Was the pass intercepted?
            Interception = if_else(str_detect(str_to_lower(Description), "intercepted"), 1, 0),
            # Was the pass completed?
            Complete = if_else(PassAttempt == 1 & !str_detect(Description, "incomplete") &
                                   Interception != 1, 1, 0),
            # Get yards gained on play
-           YardsGained = case_when(Spike == 1 | Complete == 0 ~ 0,
+           YardsGained = case_when((PassAttempt == 1 & Complete == 0) | Spike == 1 | QBKneel == 1 ~ 0,
                                    str_detect(Description, "sacked to") ~
-                                       as.numeric(str_extract(Description, "(?<=\\sfor\\s)\\-?\\[0-9]{1,2}")),
+                                       as.numeric(str_extract(Description, "(?<=\\sfor\\s)\\-?\\[0-9]{1,2}")), # I believe this never triggers and the bottom case deals with sacks
                                    PlayType %in% c("run","dropback") ~ 
-                                       as.numeric(stri_extract_last_regex(Description,pattern=c("\\-*\\d+\\.*\\d*")))),
+                                       as.numeric(stri_extract_last_regex(gsub("PENALTY.*","",Description),pattern=c("\\-*\\d+\\.*\\d*")))),
            # Is this a touchdown?
            Touchdown = if_else(str_detect(str_to_lower(Description), "touchdown"), 1, 0),
            # Extra point succesful?
@@ -136,16 +136,16 @@ clean_data <- function(df){
            PenaltyType = case_when(Penalty == 1 ~ gsub(".*PENALTY","",Description) %>% stri_extract_first_regex(pattern=c("[.].*,")) %>%
                                      str_split(",") %>% sapply( "[[", 1) %>% gsub(pattern="([.] )",replacement="")
                                    ),
-           # How many yards lost?
-           PenaltyYards = case_when(Penalty == 1 ~ gsub(".*PENALTY","",Description) %>% 
-                                      stri_extract_first_regex(pattern=c(pattern=c("\\-*\\d+\\.*\\d*"))) %>% as.numeric()
+           # How many yards lost/gained?
+           PenaltyYards = case_when(Penalty == 1 & PenaltyTeam == Off ~ -as.numeric(stri_extract_first_regex(gsub(".*PENALTY","",Description),pattern=c("\\-*\\d+\\.*\\d*"))),
+                                    Penalty == 1 & PenaltyTeam != Off ~ as.numeric(stri_extract_first_regex(gsub(".*PENALTY","",Description),pattern=c("\\-*\\d+\\.*\\d*")))
            ),
            # Extract passer name
-           PasserName = case_when(PlayType == "pass" ~ stri_extract_first_regex(Description,pattern=c("[A-Z][.]([a-zA-Z]+)"))),
+           PasserName = case_when(PassAttempt == 1 ~ stri_extract_first_regex(Description,pattern=c("[A-Z][.]([a-zA-Z]+)"))),
            # Extract receiver name
-           ReceiverName = case_when(PlayType == "pass" & Interception == 0 ~
+           ReceiverName = case_when(PassAttempt == 1 & Interception == 0 ~
                                       stri_extract_last_regex(Description,pattern=c(" [A-Z][.]([a-zA-Z]+)")) %>% str_trim(),
-                                    PlayType == "pass" & Interception == 1 ~
+                                    PassAttempt == 1 & Interception == 1 ~
                                       stri_extract_last_regex(gsub("INTERCEPTED.*","",Description),pattern=c("[A-Z][.]([a-zA-Z]+)"))
                                     ),
            # Extract rusher name
