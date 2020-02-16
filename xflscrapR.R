@@ -81,6 +81,10 @@ clean_data <- function(df){
            GameID = if_else(Game%%2 == 1,
                             as.character(glue("{GameID}00")),
                             as.character(glue("{GameID}01"))),
+           # GameTime
+           QuarterSecondsRemaining = unlist(lapply(Time, mins_to_seconds)),
+           HalfSecondsRemaining = if_else(Qtr %in% c("2","4"), QuarterSecondsRemaining, QuarterSecondsRemaining + 900),
+           GameSecondsRemaining = QuarterSecondsRemaining + ((4 - as.numeric(Qtr)) * 900),
            # Extract Down and Distance
            Down = str_extract(Situation, "^[1-4]"),
            Distance = str_extract(Situation, "(?<=\\& )[0-9]+"),
@@ -188,3 +192,16 @@ xfl_scrapR <- function(){
 }
 
 pbp <- xfl_scrapR()
+#pbp2 <- add_nflscrapR_epa(pbp1)
+
+
+
+###### nflscrapR variables
+add_nflscrapR_epa <- function(df){
+  library(nflscrapR)
+  cat("WARNING: this relies on the nflscrapR model built exclusively on NFL data, not XFL data. When using these numbers, keep in mind that it will fail to capture differences between the two leagues. This should only be used until a XFL-specific EPA model is available.")
+  df_ep <- nflscrapR::calculate_expected_points(df,"HalfSecondsRemaining","Yardline_100","Down","Distance","GoalToGo") %>%
+    mutate(epa = if_else(Off==lead(Off,1),lead(ep,1) - ep, -lead(ep,1) - ep))
+  return(df_ep)
+}
+
