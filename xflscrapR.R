@@ -6,6 +6,8 @@ library(lubridate)
 library(magrittr)
 library(stringi)
 
+source("helpers.R")
+
 # Function that navigates to each game web page and scrapes the play by play
 retrieve_games <- function(game_num){
   
