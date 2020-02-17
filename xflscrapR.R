@@ -2,6 +2,7 @@ library(glue)
 library(RSelenium)
 library(XML)
 library(tidyverse)
+library(hms)
 library(lubridate)
 library(magrittr)
 library(stringi)
@@ -53,16 +54,16 @@ retrieve_games <- function(game_num){
   game_pbp <- map_dfr(1:plays, function(x){
     play_info <- tibble(Game = game_num)
     play_info$PlayID <- 5*x
-    play_info$Qtr <- unlist(columns[[1]][[x]]$getElementText())
-    play_info$Time <- unlist(columns[[2]][[x]]$getElementText())
+    play_info$Qtr <- as.integer(unlist(columns[[1]][[x]]$getElementText()))
+    play_info$Time <- as_hms(unlist(columns[[2]][[x]]$getElementText()))
     play_info$Off <- unlist(columns[[3]][[x]]$getElementText())
     play_info$Situation <- unlist(columns[[4]][[x]]$getElementText())
     play_info$Description <- unlist(columns[[5]][[x]]$getElementText())
-    play_info$DrivePlays <- unlist(columns[[6]][[x]]$getElementText())
-    play_info$DriveYards <- unlist(columns[[7]][[x]]$getElementText())
-    play_info$DriveTime <- unlist(columns[[8]][[x]]$getElementText())
-    play_info$AwayScoreAfterDrive <- unlist(columns[[9]][[x]]$getElementText())
-    play_info$HomeScoreAfterDrive <- unlist(columns[[10]][[x]]$getElementText())
+    play_info$DrivePlays <- as.integer(unlist(columns[[6]][[x]]$getElementText()))
+    play_info$DriveYards <- as.integer(unlist(columns[[7]][[x]]$getElementText()))
+    play_info$DriveTime <- as_hms(unlist(columns[[8]][[x]]$getElementText()))
+    play_info$AwayScoreAfterDrive <- as.numeric(unlist(columns[[9]][[x]]$getElementText()))
+    play_info$HomeScoreAfterDrive <- as.numeric(unlist(columns[[10]][[x]]$getElementText()))
     play_info$HomeTeam <- home
     play_info$AwayTeam <- away
     return(play_info)
@@ -76,6 +77,7 @@ clean_data <- function(df){
   pbp1 <- df %>%
     select(-c(15:ncol(df))) %>%
     mutate(Week = ceiling(Game/4),
+           Week = ceiling(Game/4),
            # Create GameIDs in NFL's GSIS format
            GameID = if_else(Game%%4 %in% c(1, 2),
                             str_remove_all(glue("{ymd(20200208) + (Week-1)*7}"), "-"),
@@ -83,13 +85,14 @@ clean_data <- function(df){
            GameID = if_else(Game%%2 == 1,
                             as.character(glue("{GameID}00")),
                             as.character(glue("{GameID}01"))),
+           GameID = as.numeric(GameID),
            # GameTime
            QuarterSecondsRemaining = unlist(lapply(Time, mins_to_seconds)),
            HalfSecondsRemaining = if_else(Qtr %in% c("2","4"), QuarterSecondsRemaining, QuarterSecondsRemaining + 900),
            GameSecondsRemaining = QuarterSecondsRemaining + ((4 - as.numeric(Qtr)) * 900),
            # Extract Down and Distance
-           Down = str_extract(Situation, "^[1-4]"),
-           Distance = str_extract(Situation, "(?<=\\& )[0-9]+"),
+           Down = as.integer(str_extract(Situation, "^[1-4]")),
+           Distance = as.integer(str_extract(Situation, "(?<=\\& )[0-9]+")),
            # Convert Field Position to Yards from the end zone
            Yardline_100 = case_when(str_detect(Situation, "50$") ~ 50,
                                     str_extract(Situation, "[A-Z]+(?= [0-9]{1,2}$)") == Off ~ 
@@ -164,7 +167,8 @@ clean_data <- function(df){
 # Function that can read in the most recently updated version of xflscrapR's pbp data, and will update
 # automatically with the most recent data if more games have been played
 xfl_scrapR <- function(){
-  pbp <- read_csv(url("https://raw.githubusercontent.com/keegan-abdoo/xflscrapR/master/play_by_play_data/regular_season/reg_pbp_2020.csv"))
+  pbp <- read_csv(url("https://raw.githubusercontent.com/keegan-abdoo/xflscrapR/master/play_by_play_data/regular_season/reg_pbp_2020.csv")) %>%
+      clean_data()
   
   most_recent_game <- if_else(wday(as_date(Sys.time())) == 7, 2, 4) + 
     4*floor((as.numeric(as_date(Sys.time())) - as.numeric(ymd(20200208)))/7)
@@ -177,7 +181,7 @@ xfl_scrapR <- function(){
     remDr <- driver[["client"]]
     
     # Scrape new games
-    pbp1 <- map_dfr(last_game:most_recent_game, retrieve_games)
+    pbp1 <- map_dfr((last_game+1):most_recent_game, retrieve_games)
     
     # Clean Data
     pbp1 %<>% clean_data(pbp1)
