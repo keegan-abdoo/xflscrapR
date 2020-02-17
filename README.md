@@ -29,6 +29,8 @@ Before we get into the actual code, I'm going to briefly explain the idea of rem
 
 The function rsDriver opens up a specified browser on your computer (I use firefox here) and starts a selenium server.  It returns a list (which we name "driver") that contains the server and a client.  We can then isolate the client and create a object of class remoteDriver (which we name "remDr"). Oversimplifying this, the remoteDriver allows us to interact with and control the browser from our R console.
 
+DISCLAIMER: This was brought to my attention by Ben Baldwin (@benbbaldwin)[https://twitter.com/benbbaldwin].  The rsDriver function will throw a error if your downloaded Java is not the same version as your R. If you are working with a 64-bit R build, you need a 64-bit of Java (which you can download here)[https://java.com/en/download/manual.jsp].
+
 ```r
 driver <- rsDriver(browser = c("firefox"))
 remDr <- driver[["client"]]
