@@ -74,8 +74,12 @@ retrieve_games <- function(game_num){
 
 # Function that reads in pbp data and cleans/parses it
 clean_data <- function(df){
+  c_names <- c("Game", "PlayID", "Qtr", "Time", "Off", "Situation", "Description",
+               "DrivePlays", "DriveYards", "DriveTime", "AwayScoreAfterDrive", 
+               "HomeScoreAfterDrive", "HomeTeam", "AwayTeam")
+  
   pbp1 <- df %>%
-    select(-c(15:ncol(df))) %>%
+    select(c_names) %>%
     mutate(Week = ceiling(Game/4),
            Week = ceiling(Game/4),
            # Create GameIDs in NFL's GSIS format
