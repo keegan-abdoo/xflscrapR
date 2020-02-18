@@ -139,18 +139,18 @@ clean_data <- function(df){
                                            ),
            # Is this a penalty?
            Penalty = if_else(str_detect(Description,"PENALTY"),1,0),
-           # On who is the penalty?
-           PenaltyTeam = case_when(Penalty == 1 ~ gsub(".*PENALTY","",Description) %>% str_split(" ") %>% sapply( "[[", 3) %>% 
-                                     gsub(pattern = "[.]", replacement = "")
-                                  ),
-           # What kind of penalty?
-           PenaltyType = case_when(Penalty == 1 ~ gsub(".*PENALTY","",Description) %>% stri_extract_first_regex(pattern=c("[.].*,")) %>%
-                                     str_split(",") %>% sapply( "[[", 1) %>% gsub(pattern="([.] )",replacement="")
-                                   ),
-           # How many yards lost/gained?
-           PenaltyYards = case_when(Penalty == 1 & PenaltyTeam == Off ~ -as.numeric(stri_extract_first_regex(gsub(".*PENALTY","",Description),pattern=c("\\-*\\d+\\.*\\d*"))),
-                                    Penalty == 1 & PenaltyTeam != Off ~ as.numeric(stri_extract_first_regex(gsub(".*PENALTY","",Description),pattern=c("\\-*\\d+\\.*\\d*")))
-           ),
+           # # On who is the penalty?
+           # PenaltyTeam = case_when(Penalty == 1 ~ gsub(".*PENALTY","",Description) %>% str_split(" ") %>% sapply( "[[", 3) %>% 
+           #                           gsub(pattern = "[.]", replacement = "")
+           #                        ),
+           # # What kind of penalty?
+           # PenaltyType = case_when(Penalty == 1 ~ gsub(".*PENALTY","",Description) %>% stri_extract_first_regex(pattern=c("[.].*,")) %>%
+           #                           str_split(",") %>% sapply( "[[", 1) %>% gsub(pattern="([.] )",replacement="")
+           #                         ),
+           # # How many yards lost/gained?
+           # PenaltyYards = case_when(Penalty == 1 & PenaltyTeam == Off ~ -as.numeric(stri_extract_first_regex(gsub(".*PENALTY","",Description),pattern=c("\\-*\\d+\\.*\\d*"))),
+           #                          Penalty == 1 & PenaltyTeam != Off ~ as.numeric(stri_extract_first_regex(gsub(".*PENALTY","",Description),pattern=c("\\-*\\d+\\.*\\d*")))
+           # ),
            # Extract passer name
            PasserName = case_when(PassAttempt == 1 ~ stri_extract_first_regex(Description,pattern=c("[A-Z][.]([a-zA-Z]+)"))),
            # Extract receiver name
@@ -168,25 +168,52 @@ clean_data <- function(df){
 
 # Function that can read in the most recently updated version of xflscrapR's pbp data, and will update
 # automatically with the most recent data if more games have been played
-xfl_scrapR <- function(){
+xfl_scrapR <- function(browser_port=NA){
   pbp <- read_csv(url("https://raw.githubusercontent.com/keegan-abdoo/xflscrapR/master/play_by_play_data/regular_season/reg_pbp_2020.csv")) %>%
       clean_data()
-  
-  most_recent_game <- if_else(wday(as_date(Sys.time())) == 7, 2, 4) + 
+
+  most_recent_game <- if_else(wday(as_date(Sys.time())) == 7, 2, 4) +
     4*floor((as.numeric(as_date(Sys.time())) - as.numeric(ymd(20200208)))/7)
-  
+
   last_game <- max(pbp$Game)
   
   if(most_recent_game > last_game){
     # Open Web Browser
-    driver <- rsDriver(browser = "firefox")
-    remDr <- driver[["client"]]
+    if (is.na(browser_port)){
+      try_browser<-try(driver <- rsDriver(browser = "firefox"),silent = TRUE)
+    } else {
+      try_browser<-try(driver <- rsDriver(browser = "firefox",port=as.integer(browser_port)),silent = TRUE)
+    }
     
+    # Catch error on browser launch
+    tries <- 0
+    port_range <- as.integer(seq(4567,10000))
+    while (class(try_browser) =="try-error") {
+      tries <- tries + 1
+      # timeout if too many tries
+      if (tries >= 10){
+        cat(try_browser[1])
+        stop("Selenium failed to launch after 10 retries. The final error is printed above. \n If this is a port already in use error, specify an open port through the browser_port parameter.")
+      }
+      
+      # port in use error
+      if (str_detect(try_browser[1],"already in use")){
+        cat("Re-trying to launch Selenium with different port.\n")
+        port <- sample(port_range,1)
+        try_browser<-try(driver <- rsDriver(browser = "firefox",port=port),silent = TRUE)
+      }
+
+      # TO-DO: handle other errors
+    }
+    
+    # assign client driver
+    remDr <- driver[["client"]]
+  
     # Scrape new games
     pbp1 <- map_dfr((last_game+1):most_recent_game, retrieve_games)
     
     # Clean Data
-    pbp1 %<>% clean_data(pbp1)
+    pbp1 %<>% clean_data()
     
     # Join to old data
     pbp <<- bind_rows(pbp, pbp1)
