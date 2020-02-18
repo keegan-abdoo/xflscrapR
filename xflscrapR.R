@@ -7,8 +7,6 @@ library(lubridate)
 library(magrittr)
 library(stringi)
 
-source("helpers.R")
-
 # Function that navigates to each game web page and scrapes the play by play
 retrieve_games <- function(game_num){
   
@@ -55,7 +53,7 @@ retrieve_games <- function(game_num){
     play_info <- tibble(Game = game_num)
     play_info$PlayID <- 5*x
     play_info$Qtr <- as.integer(unlist(columns[[1]][[x]]$getElementText()))
-    play_info$Time <- as_hms(unlist(columns[[2]][[x]]$getElementText()))
+    play_info$Time <- as_hms(paste("00:",unlist(columns[[2]][[x]]$getElementText()),sep=""))
     play_info$Off <- unlist(columns[[3]][[x]]$getElementText())
     play_info$Situation <- unlist(columns[[4]][[x]]$getElementText())
     play_info$Description <- unlist(columns[[5]][[x]]$getElementText())
@@ -91,7 +89,7 @@ clean_data <- function(df){
                             as.character(glue("{GameID}01"))),
            GameID = as.numeric(GameID),
            # GameTime
-           QuarterSecondsRemaining = unlist(lapply(Time, mins_to_seconds)),
+           QuarterSecondsRemaining = as.numeric(Time),
            HalfSecondsRemaining = if_else(Qtr %in% c("2","4"), QuarterSecondsRemaining, QuarterSecondsRemaining + 900),
            GameSecondsRemaining = QuarterSecondsRemaining + ((4 - as.numeric(Qtr)) * 900),
            # Extract Down and Distance
