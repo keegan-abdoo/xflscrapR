@@ -6,6 +6,8 @@ library(hms)
 library(lubridate)
 library(magrittr)
 library(stringi)
+library(gsheet)
+source("helpers.R")
 
 # Function that navigates to each game web page and scrapes the play by play
 retrieve_games <- function(game_num,driver){
@@ -202,11 +204,30 @@ clean_data <- function(df){
   return(pbp1)
 }
 
+add_air_yards <- function(df){
+  # load in data from Moose Jester, @CFB_Moose on Twitter
+  # process to match xflscrapR data
+  air_yards <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1Esh5R0zJFXlislSUngzm3GeLNDPLF4uckUknWFIoVZ0/edit#gid=0') %>%
+    filter(WEEK %in% unique(df$Week)) %>%
+    mutate(START = as_hms(glue("00:{substr(as.character(START),1,5)}")),
+           PassAttempt = 1) %>%
+    dplyr::select(GAMEID,WEEK,QTR,START,PassAttempt,`AIR YARDS`) %>%
+    rename(Game = GAMEID, Week = WEEK, Qtr = QTR, Time = START, AirYards = `AIR YARDS`)
+  
+  # join air yards column
+  df <- df %>%
+    left_join(air_yards,by=c("Game","Week","Qtr","Time","PassAttempt"))
+  
+  # return finished df
+  return(df)
+}
+
 # Function that can read in the most recently updated version of xflscrapR's pbp data, and will update
 # automatically with the most recent data if more games have been played
 xfl_scrapR <- function(browser_port=NA){
   pbp <- read_csv(url("https://raw.githubusercontent.com/keegan-abdoo/xflscrapR/master/play_by_play_data/regular_season/reg_pbp_2020.csv")) %>%
-      clean_data()
+      clean_data() %>%
+      add_air_yards()
 
   most_recent_game <- if_else(wday(as_date(Sys.time())) == 7, 2, 4) +
     4*floor((as.numeric(as_date(Sys.time())) - as.numeric(ymd(20200208)))/7)
@@ -251,6 +272,9 @@ xfl_scrapR <- function(browser_port=NA){
     # Clean Data
     pbp1 %<>% clean_data()
     
+    # Add air yards
+    pbp1 %<>% add_air_yards()
+    
     # Join to old data
     pbp <<- bind_rows(pbp, pbp1)
     
@@ -263,8 +287,12 @@ xfl_scrapR <- function(browser_port=NA){
 }
 
 pbp <- xfl_scrapR()
-#pbp2 <- add_nflscrapR_epa(pbp1)
+pbp2 <- add_nflscrapR_epa(pbp)
 
+pbp2 %>%
+  filter(Complete==1) %>%
+  ggplot(aes(x=AirYards,y=epa)) +
+  geom_point()
 
 
 ###### nflscrapR variables
