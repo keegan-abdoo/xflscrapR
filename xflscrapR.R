@@ -53,7 +53,7 @@ retrieve_games <- function(game_num,driver){
     play_info <- tibble(Game = game_num)
     play_info$PlayID <- 5*x
     play_info$Qtr <- as.integer(unlist(columns[[1]][[x]]$getElementText()))
-    play_info$Time <- as_hms(paste("00:",unlist(columns[[2]][[x]]$getElementText()),sep=""))
+    play_info$Time <- as_hms(glue("00:{unlist(columns[[2]][[x]]$getElementText())}"))
     play_info$Off <- unlist(columns[[3]][[x]]$getElementText())
     play_info$Situation <- unlist(columns[[4]][[x]]$getElementText())
     play_info$Description <- unlist(columns[[5]][[x]]$getElementText())
@@ -79,7 +79,6 @@ clean_data <- function(df){
   pbp1 <- df %>%
     select(c_names) %>%
     mutate(Week = ceiling(Game/4),
-           Week = ceiling(Game/4),
            # Create GameIDs in NFL's GSIS format
            GameID = if_else(Game%%4 %in% c(1, 2),
                             str_remove_all(glue("{ymd(20200208) + (Week-1)*7}"), "-"),
@@ -89,54 +88,91 @@ clean_data <- function(df){
                             as.character(glue("{GameID}01"))),
            GameID = as.numeric(GameID),
            # GameTime
-           QuarterSecondsRemaining = as.numeric(Time),
+           QuarterSecondsRemaining = as.numeric(str_extract(as.character(Time), "^[0-9]{1,2}")) * 60 +
+               as.numeric(str_extract(as.character(Time), "(?<=:)[0-9]{2}")), 
            HalfSecondsRemaining = if_else(Qtr %in% c("2","4"), QuarterSecondsRemaining, QuarterSecondsRemaining + 900),
            GameSecondsRemaining = QuarterSecondsRemaining + ((4 - as.numeric(Qtr)) * 900),
            # Extract Down and Distance
-           Down = as.integer(str_extract(Situation, "^[1-4]")),
-           Distance = as.integer(str_extract(Situation, "(?<=\\& )[0-9]+")),
+           Down = str_extract(Situation, "^[1-4]"),
+           Distance = str_extract(Situation, "(?<=\\& )[0-9]+"),
            # Convert Field Position to Yards from the end zone
-           Yardline_100 = case_when(str_detect(Situation, "50$") ~ 50,
-                                    str_extract(Situation, "[A-Z]+(?= [0-9]{1,2}$)") == Off ~ 
-                                      100 - as.numeric(str_extract(Situation, "[0-9]{1,2}$")),
-                                    TRUE ~ as.numeric(str_extract(Situation, "[0-9]{1,2}$"))),
+           Yardline_100 = yl_100(Situation, Off),
            # Is it goal to go?
            GoalToGo = if_else(Distance == Yardline_100, 1, 0),
            # Get Play Types
-           PlayType = case_when(str_detect(Description, "(rush)|(kneel)") ~ "run",
+           PlayType = case_when(str_detect(Description, "[1-3]pt attempt") ~ "extra point",
+                                str_detect(Description, "(rush)|(kneel)") ~ "run",
                                 str_detect(Description, "(pass)|(scramble)|(sack)|(spike)") ~ "dropback",
                                 str_detect(Description, "punt") ~ "punt",
                                 str_detect(Description, "kickoff") ~ "kickoff",
                                 str_detect(str_to_lower(Description), "field goal") ~ "field goal",
-                                str_detect(Description, "[1-3]pt attempt") ~ "extra point",
                                 str_detect(Description, "Aborted") ~ "aborted snap",
                                 TRUE ~ "no play"),
+           # Did the QB align in shotgun?
+           Shotgun = case_when(PlayType %in% c("run", "dropback") ~ if_else(str_detect(Description, "Shotgun"), 1, 0)),
+           # Did the offense Huddle?
+           NoHuddle = case_when(PlayType %in% c("run", "dropback") ~ if_else(str_detect(Description, "No Huddle"), 1, 0)),
            # Is pass a spike?
-           Spike = if_else(str_detect(Description, "spike"), 1, 0),
+           Spike = case_when(PlayType == "dropback" ~ if_else(str_detect(Description, "spike"), 1, 0)),
            # Is pass a QB Kneel
-           QBKneel = if_else(str_detect(Description, "kneel"), 1, 0),
+           QBKneel = case_when(PlayType == "run" ~ if_else(str_detect(Description, "kneel"), 1, 0)),
            # Was the QB sacked?
-           Sack = if_else(str_detect(Description, "sack"), 1, 0),
+           Sack = case_when(PlayType == "dropback" ~ if_else(str_detect(Description, "sack"), 1, 0)),
            # Did the QB Scramble?
-           Scramble = if_else(str_detect(Description, "scramble"), 1, 0),
+           Scramble = case_when(PlayType == "dropback" ~ if_else(str_detect(Description, "scramble"), 1, 0)),
            # Was there a pass attempt?
-           PassAttempt = if_else(Sack == 0 & Scramble == 0 & Spike == 0 & QBKneel == 0 & PlayType == "dropback", 1, 0),
+           PassAttempt = case_when(PlayType == "dropback" ~ if_else(Sack == 0 & Scramble == 0, 1, 0)),
            # Was the pass intercepted?
-           Interception = if_else(str_detect(str_to_lower(Description), "intercepted"), 1, 0),
+           Interception = case_when(PassAttempt == 1 ~ 
+                                        if_else(str_detect(str_to_lower(Description), "intercepted"), 1, 0)),
            # Was the pass completed?
-           Complete = if_else(PassAttempt == 1 & !str_detect(Description, "incomplete") &
-                                  Interception != 1, 1, 0),
-           # Get yards gained on play
-           YardsGained = case_when((PassAttempt == 1 & Complete == 0) | Spike == 1 | QBKneel == 1 ~ 0,
-                                   str_detect(Description, "sacked to") ~
-                                       as.numeric(str_extract(Description, "(?<=\\sfor\\s)\\-?\\[0-9]{1,2}")), # I believe this never triggers and the bottom case deals with sacks
-                                   PlayType %in% c("run","dropback") ~ 
-                                       as.numeric(stri_extract_last_regex(gsub("PENALTY.*","",Description),pattern=c("\\-*\\d+\\.*\\d*")))),
-           # Is this a touchdown?
+           Complete = case_when(PassAttempt == 1 ~ 
+                                    if_else(str_detect(Description, "incomplete") |
+                                                !str_detect(Description, "[0-9]") |
+                                                Interception == 1, 0, 1)),
+           # Was the pass thrown away?
+           Throwaway = case_when(PassAttempt == 1 ~ ifelse(str_detect(Description, "incomplete\\."), 1, 0)),
+           # Pass Depth and Direction buckets
+           PassDepth = str_extract(Description, "(?<=pass (incomplete )?)(short)|(deep)"),
+           PassDirection = str_extract(Description, "(?<=pass (incomplete )?((short)|(deep)) )(left)|(middle)|(right)"),
+           # Run Gap
+           RunDirection = str_extract(Description, "(?<=rush )([A-z]+\\s[A-z]+)+(?=\\s((to)|(out)|(for)))"),
+           # Did the play result in a touchdown?
            Touchdown = if_else(str_detect(str_to_lower(Description), "touchdown"), 1, 0),
+           # Was there a fumble?
+           Fumble = if_else(str_detect(str_to_lower(Description), "fumble"), 1, 0),
+           # Yards Gained from Scrimmage
+           YardsGained = case_when(Spike == 1 | Complete == 0 ~ 0,
+                                   PlayType %in% c("run", "dropback") & Fumble == 1 & 
+                                       !str_detect(Description, "Aborted") ~ Yardline_100 - 
+                                       yl_100(str_extract(Description, "(?<= to )[A-Z]{2,3}\\s[0-9]{1,2}"), Off),
+                                   PlayType == "dropback" & str_detect(Description, "Aborted") ~ Yardline_100 - 
+                                       yl_100(str_extract(Description, "(?<= to )[A-Z]{2,3}\\s[0-9]{1,2}"), Off),
+                                   PlayType == "run" & str_detect(Description, "Aborted") ~ Yardline_100 - 
+                                       yl_100(str_extract(Description, "(?<= at the )[A-Z]{2,3}\\s[0-9]{1,2}"), Off),
+                                   PlayType %in% c("run","dropback") ~ 
+                                       as.numeric(str_extract(Description, "\\-?[0-9]{1,2}(?= yards)"))),
+           #as.numeric(stri_extract_last_regex(Description,pattern=c("\\-*\\d+\\.*\\d*")))),
+           # Did the play result in a first down?
+           FirstDown = if_else(Off == lead(Off) & GameID == lead(GameID) & PlayType %in% c("run", "dropback") &
+                                   lead(Down) == 1 & YardsGained >= Distance, 1, 0),
+           # Did the offense turn the ball over?
+           Turnover = if_else(((Off != lead(Off) & GameID == lead(GameID) & 
+                                    Qtr == lead(Qtr)) | Interception == 1) &
+                                  !(PlayType %in% c("punt", "field goal", "extra point")), 1, 0),
+           TurnoverType = case_when(Turnover == 1 & Fumble == 1 ~ "Fumble",
+                                    Turnover == 1 & Interception == 1 ~ "Interception",
+                                    Turnover == 1 & Down == 4 ~ "Downs"),
+           # Did the defense recover the fumble?
+           FumbleLost = if_else(Fumble == 1 & Turnover == 1, 1, 0),
+           # Did the Offense go for it on fourth down?
+           FourthDownDecision = case_when(Down == 4 ~ if_else(PlayType %in% c("dropback", "run"), 1, 0)),
+           # What Type of Extra Point did the offense attempt?
+           ExtraPointType = as.numeric(if_else(PlayType == "extra point", 
+                                               str_extract(Description, "^[1-3]"), "NA")),
            # Extra point succesful?
-           ExtraPointConverted = case_when(PlayType == "extra point" ~ if_else(str_detect(Description,"unsuccessful"),0,1)
-                                           ),
+           ExtraPointConverted = case_when(PlayType == "extra point" ~ 
+                                               if_else(str_detect(Description, " successful"), 1, 0)),
            # Is this a penalty?
            Penalty = if_else(str_detect(Description,"PENALTY"),1,0),
            # # On who is the penalty?
