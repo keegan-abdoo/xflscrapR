@@ -8,28 +8,28 @@ library(magrittr)
 library(stringi)
 
 # Function that navigates to each game web page and scrapes the play by play
-retrieve_games <- function(game_num){
+retrieve_games <- function(game_num,driver){
   
   # Navigate to XFL Stats Page
-  remDr$navigate(glue("https://stats.xfl.com/{game_num}"))
+  driver$navigate(glue("https://stats.xfl.com/{game_num}"))
   
   Sys.sleep(4)
   # Click on play list tab
-  remDr$findElement("xpath", "//h3[@id = 'pgPlayList']")$clickElement()
+  driver$findElement("xpath", "//h3[@id = 'pgPlayList']")$clickElement()
   
   # Retrieve Home and Away Team Codes
-  away <- unlist(remDr$findElement("xpath", "//div[@data-bind = 'text: awayClubCode']")$getElementText())
-  home <- unlist(remDr$findElement("xpath", "//div[@data-bind = 'text: homeClubCode']")$getElementText())
+  away <- unlist(driver$findElement("xpath", "//div[@data-bind = 'text: awayClubCode']")$getElementText())
+  home <- unlist(driver$findElement("xpath", "//div[@data-bind = 'text: homeClubCode']")$getElementText())
   
   # Create function that returns a list of webElements containing each row value in a column
   retrieve_column <- function(column_name){
     if(column_name == "rPlayDesc"){
-      remDr$findElements("xpath", glue("//div[@class = 'table totalPlaylist']\\
+      driver$findElements("xpath", glue("//div[@class = 'table totalPlaylist']\\
                                       //child::div[@class = 'body']\\
                                       //child::div[@class = '{column_name}']\\
                                       //child::div[contains(@data-bind, 'PlayDescription')]"))
     } else {
-      remDr$findElements("xpath", glue("//div[@class = 'table totalPlaylist']\\
+      driver$findElements("xpath", glue("//div[@class = 'table totalPlaylist']\\
                                       //child::div[@class = 'body']\\
                                       //child::div[@class = '{column_name}']"))
     }
@@ -210,7 +210,7 @@ xfl_scrapR <- function(browser_port=NA){
     remDr <- driver[["client"]]
   
     # Scrape new games
-    pbp1 <- map_dfr((last_game+1):most_recent_game, retrieve_games)
+    pbp1 <- map_dfr((last_game+1):most_recent_game, retrieve_games, driver=remDr)
     
     # Clean Data
     pbp1 %<>% clean_data()
