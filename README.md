@@ -60,6 +60,8 @@ COMING SOON - This section will include short guides on ways you can use the dat
 
 ## Bug Reporting & Contributing
 
+This project is still very much a work in progress and has several bugs. If you spot one, please report it in the issues section of this repository. Identifying and isolating bugs is half the legwork of debugging, so we'd really appreciate any bug reports.
+
 If you'd like to contribute to this project, we reccomend creating an issue and detailing what you're hoping to fix or add, along with your code. If it's a worthwhile inclusion and your code matches our architecture well, we'll merge it into the repository.
 
 ## Authors
