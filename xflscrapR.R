@@ -80,7 +80,11 @@ clean_data <- function(df){
   
   pbp1 <- df %>%
     select(c_names) %>%
-    mutate(Week = ceiling(Game/4),
+    mutate(# Fix Game 7 issue where one drive has the wrong Offense
+           Off = if_else(Game == 7 & Qtr == 4 & between(PlayID, 655, 690), "DAL", Off),
+           # Add Defensive Team
+           Def = if_else(Off == HomeTeam, AwayTeam, HomeTeam),
+           Week = ceiling(Game/4),
            # Create GameIDs in NFL's GSIS format
            GameID = if_else(Game%%4 %in% c(1, 2),
                             str_remove_all(glue("{ymd(20200208) + (Week-1)*7}"), "-"),
