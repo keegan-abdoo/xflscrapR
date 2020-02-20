@@ -90,8 +90,8 @@ clean_data <- function(df){
                             as.character(glue("{GameID}01"))),
            GameID = as.numeric(GameID),
            # GameTime
-           QuarterSecondsRemaining = as.numeric(str_extract(as.character(Time), "^[0-9]{1,2}")) * 60 +
-               as.numeric(str_extract(as.character(Time), "(?<=:)[0-9]{2}")), 
+           QuarterSecondsRemaining = as.numeric(str_extract(as.character(Time), "(?<=:)[0-9]{2}")) * 60 +
+             as.numeric(str_extract(as.character(Time), "[0-9]{2}$")),
            HalfSecondsRemaining = if_else(Qtr %in% c("2","4"), QuarterSecondsRemaining, QuarterSecondsRemaining + 900),
            GameSecondsRemaining = QuarterSecondsRemaining + ((4 - as.numeric(Qtr)) * 900),
            # Extract Down and Distance
