@@ -249,7 +249,7 @@ add_air_yards <- function(df){
   # join air yards column
   df <- df %>%
     left_join(air_yards,by=c("Game","Week","qtr","time","pass_attempt"))  %>%
-    mutate(yards_after_catch = if_else(complete_pass == 1, yards_gained - air_yards))
+    mutate(yards_after_catch = case_when(complete_pass == 1 ~ yards_gained - air_yards))
   
   # return finished df
   return(df)
@@ -332,8 +332,8 @@ add_nflscrapR_epa <- function(df){
             used until a XFL-specific EPA model is available."))
   df_ep <- nflscrapR::calculate_expected_points(df, "half_seconds_remaining", "yardline_100", "down", "ydstogo", "goal_to_go",
                                                 td_value = 6.5) %>%
-    mutate(epa = case_when(Touchdown == 1 & Turnover == 0 ~ 7 - ep,
-                           Touchdown == 1 & Turnover == 1 ~ -7 - ep,
+    mutate(epa = case_when(Touchdown == 1 & Turnover == 0 ~ 6.5 - ep,
+                           Touchdown == 1 & Turnover == 1 ~ -6.5 - ep,
                            PlayType == "field goal" & FieldGoalMade == 1 ~ 3 - ep,
                            TRUE ~ if_else(Off == lead(Off), lead(ep) - ep, -lead(ep) - ep)
                   )
