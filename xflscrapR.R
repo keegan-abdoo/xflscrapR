@@ -311,7 +311,7 @@ pbp <- xfl_scrapR()
 add_nflscrapR_epa <- function(df){
   library(nflscrapR)
   cat("WARNING: this relies on the nflscrapR model built exclusively on NFL data, not XFL data. When using these numbers, keep in mind that it will fail to capture differences between the two leagues. This should only be used until a XFL-specific EPA model is available.")
-  df_ep <- nflscrapR::calculate_expected_points(df,"HalfSecondsRemaining","Yardline_100","Down","Distance","GoalToGo") %>%
+  df_ep <- nflscrapR::calculate_expected_points(df,"HalfSecondsRemaining","Yardline_100","Down","Distance","GoalToGo",td_value = 6.5) %>%
     mutate(epa = case_when(Touchdown == 1 & Turnover == 0 ~ 7 - ep,
                            Touchdown == 1 & Turnover == 1 ~ -7 - ep,
                            PlayType == "field goal" & FieldGoalMade == 1 ~ 3 - ep,
