@@ -159,9 +159,10 @@ clean_data <- function(df){
            FirstDown = if_else((Off == lead(Off) | is.na(lead(Off))) & GameID == lead(GameID) & PlayType %in% c("run", "dropback") &
                                    (lead(Down) == 1 | is.na(lead(Down))) & YardsGained >= Distance, 1, 0),
            # Did the offense turn the ball over?
-           Turnover = if_else(((Off != lead(Off) & GameID == lead(GameID) & 
+           Turnover = case_when(((Off != lead(Off) & GameID == lead(GameID) & 
                                     Qtr == lead(Qtr)) | Interception == 1) &
-                                  !(PlayType %in% c("punt", "field goal", "extra point")), 1, 0),
+                                  !(PlayType %in% c("punt", "field goal", "extra point")) ~ 1,
+                                TRUE ~ 0),
            TurnoverType = case_when(Turnover == 1 & Fumble == 1 ~ "Fumble",
                                     Turnover == 1 & Interception == 1 ~ "Interception",
                                     Turnover == 1 & Down == 4 ~ "Downs"),
@@ -305,7 +306,11 @@ add_nflscrapR_epa <- function(df){
   library(nflscrapR)
   cat("WARNING: this relies on the nflscrapR model built exclusively on NFL data, not XFL data. When using these numbers, keep in mind that it will fail to capture differences between the two leagues. This should only be used until a XFL-specific EPA model is available.")
   df_ep <- nflscrapR::calculate_expected_points(df_pens,"HalfSecondsRemaining","Yardline_100","Down","Distance","GoalToGo") %>%
-    mutate(epa = if_else(Off==lead(Off,1),lead(ep,1) - ep, -lead(ep,1) - ep))
+    mutate(epa = case_when(Touchdown == 1 & Turnover == 0 ~ 7 - ep,
+                           Touchdown == 1 & Turnover == 1 ~ -7 - ep,
+                           TRUE ~ if_else(Off==lead(Off),lead(ep) - ep, -lead(ep) - ep)
+                  )
+           )
   return(df_ep)
 }
 
