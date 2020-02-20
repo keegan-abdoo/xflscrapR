@@ -96,7 +96,7 @@ clean_data <- function(df){
            GameSecondsRemaining = QuarterSecondsRemaining + ((4 - as.numeric(Qtr)) * 900),
            # Extract Down and Distance
            Down = str_extract(Situation, "^[1-4]"),
-           Distance = str_extract(Situation, "(?<=\\& )[0-9]+"),
+           Distance = as.numeric(str_extract(Situation, "(?<=\\& )[0-9]+")),
            # Convert Field Position to Yards from the end zone
            Yardline_100 = yl_100(Situation, Off),
            # Is it goal to go?
@@ -155,9 +155,9 @@ clean_data <- function(df){
                                    PlayType %in% c("run","dropback") ~ 
                                        as.numeric(str_extract(Description, "\\-?[0-9]{1,2}(?= yards)"))),
            #as.numeric(stri_extract_last_regex(Description,pattern=c("\\-*\\d+\\.*\\d*")))),
-           # Did the play result in a first down?
-           FirstDown = if_else(Off == lead(Off) & GameID == lead(GameID) & PlayType %in% c("run", "dropback") &
-                                   lead(Down) == 1 & YardsGained >= Distance, 1, 0),
+           # Did the play result in a first down? # is.na() handles first downs before penalties, might cause false positives
+           FirstDown = if_else((Off == lead(Off) | is.na(lead(Off))) & GameID == lead(GameID) & PlayType %in% c("run", "dropback") &
+                                   (lead(Down) == 1 | is.na(lead(Down))) & YardsGained >= Distance, 1, 0),
            # Did the offense turn the ball over?
            Turnover = if_else(((Off != lead(Off) & GameID == lead(GameID) & 
                                     Qtr == lead(Qtr)) | Interception == 1) &
@@ -177,6 +177,16 @@ clean_data <- function(df){
                                                if_else(str_detect(Description, " successful"), 1, 0)),
            # Is this a penalty?
            Penalty = if_else(str_detect(Description,"PENALTY"),1,0),
+           # Fix missing down, distance, yardline, and goal to go for penalties
+           Down = case_when(Penalty == 1 & lag(FirstDown) == 1 ~ "1",
+                            Penalty == 1 & lag(FirstDown) != 1 & lag(Down) != "4" ~ as.character(as.numeric(lag(Down,1)) + 1), # need better fix to avoid 5th down
+                            TRUE ~ Down),
+           Distance = case_when(Penalty == 1 & lag(FirstDown) == 1 ~ 10,
+                                Penalty == 1 & lag(FirstDown) != 1 ~ lag(Distance) - lag(YardsGained),
+                                TRUE ~ Distance),
+           Yardline_100 = case_when(Penalty == 1 ~ lag(Yardline_100) - lag(YardsGained),
+                                    TRUE ~ Yardline_100),
+           GoalToGo = if_else(Distance == Yardline_100, 1, 0),
            # # On who is the penalty?
            # PenaltyTeam = case_when(Penalty == 1 ~ gsub(".*PENALTY","",Description) %>% str_split(" ") %>% sapply( "[[", 3) %>% 
            #                           gsub(pattern = "[.]", replacement = "")
@@ -289,17 +299,12 @@ xfl_scrapR <- function(browser_port=NA){
 pbp <- xfl_scrapR()
 pbp2 <- add_nflscrapR_epa(pbp)
 
-pbp2 %>%
-  filter(Complete==1) %>%
-  ggplot(aes(x=AirYards,y=epa)) +
-  geom_point()
-
 
 ###### nflscrapR variables
 add_nflscrapR_epa <- function(df){
   library(nflscrapR)
   cat("WARNING: this relies on the nflscrapR model built exclusively on NFL data, not XFL data. When using these numbers, keep in mind that it will fail to capture differences between the two leagues. This should only be used until a XFL-specific EPA model is available.")
-  df_ep <- nflscrapR::calculate_expected_points(df,"HalfSecondsRemaining","Yardline_100","Down","Distance","GoalToGo") %>%
+  df_ep <- nflscrapR::calculate_expected_points(df_pens,"HalfSecondsRemaining","Yardline_100","Down","Distance","GoalToGo") %>%
     mutate(epa = if_else(Off==lead(Off,1),lead(ep,1) - ep, -lead(ep,1) - ep))
   return(df_ep)
 }
