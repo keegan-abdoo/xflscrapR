@@ -147,6 +147,8 @@ clean_data <- function(df){
            run_gap = str_extract(run_direction, "(end)|(tackle)|(guard)|(middle)"),
            # Did the play result in a touchdown?
            touchdown = if_else(str_detect(str_to_lower(desc), "touchdown"), 1, 0),
+           # Was the field goal made?	
+           field_goal_made = case_when(play_type == "field goal" ~ if_else(str_detect(tolower(desc),"is good"),1,0)),
            # Was there a fumble?
            fumble = if_else(str_detect(str_to_lower(desc), "fumble"), 1, 0),
            # Yards Gained from Scrimmage
@@ -332,10 +334,10 @@ add_nflscrapR_epa <- function(df){
             used until a XFL-specific EPA model is available."))
   df_ep <- nflscrapR::calculate_expected_points(df, "half_seconds_remaining", "yardline_100", "down", "ydstogo", "goal_to_go",
                                                 td_value = 6.5) %>%
-    mutate(epa = case_when(Touchdown == 1 & Turnover == 0 ~ 6.5 - ep,
-                           Touchdown == 1 & Turnover == 1 ~ -6.5 - ep,
-                           PlayType == "field goal" & FieldGoalMade == 1 ~ 3 - ep,
-                           TRUE ~ if_else(Off == lead(Off), lead(ep) - ep, -lead(ep) - ep)
+    mutate(epa = case_when(touchdown == 1 & turnover == 0 ~ 6.5 - ep,
+                           touchdown == 1 & turnover == 1 ~ -6.5 - ep,
+                           play_type == "field goal" & field_goal_made == 1 ~ 3 - ep,
+                           TRUE ~ if_else(posteam == lead(posteam), lead(ep) - ep, -lead(ep) - ep)
                   )
            )
   return(df_ep)
