@@ -25,4 +25,3 @@ get_team_info <- function() {
   
   return(xfl_colors)
 } 
-
