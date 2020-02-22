@@ -24,4 +24,5 @@ get_team_info <- function() {
     rename(team_code = ClubCode, url = logo)
   
   return(xfl_colors)
-}
+} 
+
