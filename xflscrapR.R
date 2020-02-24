@@ -334,7 +334,7 @@ add_nflscrapR_epa <- function(df){
             used until a XFL-specific EPA model is available."))
   df_ep <- nflscrapR::calculate_expected_points(df, "half_seconds_remaining", "yardline_100", "down", "ydstogo", "goal_to_go",
                                                 td_value = 6.5) %>%
-    mutate(epa = case_when(touchdown == 1 & turnover == 0 ~ 6.5 - ep,
+    mutate(epa = case_when(touchdown == 1 & (turnover == 0 | is.na(turnover)) ~ 6.5 - ep,
                            touchdown == 1 & turnover == 1 ~ -6.5 - ep,
                            play_type == "field goal" & field_goal_made == 1 ~ 3 - ep,
                            TRUE ~ if_else(posteam == lead(posteam), lead(ep) - ep, -lead(ep) - ep)
